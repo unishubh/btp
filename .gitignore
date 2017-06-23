@@ -1,0 +1,26 @@
+# Build and Release Folders
+bin/
+bin-debug/
+bin-release/
+node_modules/
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.log
+*.out
+*.synctex.gz
+*.cls
+*.toc
+*.fls
+
+# Other files and folders
+.settings/
+data/*.json
+*.pyc
+*.swp
+push.sh
+raw_client_out
+
+# System files
+.DS_Store
