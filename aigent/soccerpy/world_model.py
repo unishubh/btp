@@ -18,7 +18,7 @@
 #############################################################################################################
 
 
-
+import numpy as np
 import math
 import random
 
@@ -52,13 +52,13 @@ class WorldModel:
         FREE_KICK_L = "free_kick_l"
         FREE_KICK_R = "free_kick_r"
         CORNER_KICK_L = "corner_kick_l"
-        CORNER_KICK_R = "corner_kick_r"
+        CORNER_KICK_R = "corner_kick_l"
         GOAL_KICK_L = "goal_kick_l"
         GOAL_KICK_R = "goal_kick_r"
         DROP_BALL = "drop_ball"
         OFFSIDE_L = "offside_l"
         OFFSIDE_R = "offside_r"
-
+        
         def __init__(self):
             raise NotImplementedError("Don't instantiate a PlayModes class,"
                     " access it statically through WorldModel instead.")
@@ -121,7 +121,7 @@ class WorldModel:
         self.side = None
         self.uniform_number = None
         #save the various actions
-
+        self.action_chosen = -1
         self.action_array = ['shoot','kick to nearest teammate','move towards the ball','dribble']
         #q_values
         self.qvalues = [0,0,0,0]
@@ -132,7 +132,7 @@ class WorldModel:
         self.training_episodes = 5
 
         #initialize weights
-        self.weight = [0,0,0,0,0,0,0]
+        self.weight =[ [0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0] ]
         #discount factor
         self.gamma = 0.5
 
@@ -670,7 +670,12 @@ class WorldModel:
             self.last_message == WorldModel.RefereeMessages.GOALIE_CATCH_BALL_L or
             self.last_message == WorldModel.RefereeMessages.GOALIE_CATCH_BALL_R ) :
             return True
-            return False
+                  
+        return False
+
+    def get_play_mode(self):
+            play_modes = ["play_on","kick_off_r","kick_off_l","kick_in_l","kick_in_r","free_kick_l","free_kick_r","corner_kick_l","corner_kick_l","corner_kick_r","goal_kick_l","goal_kick_r","offside_l","offside_r","free_kick_fault_l","free_kick_fault_l"]
+            return play_modes.index(self.play_mode)
 
 
     def should_shoot(self):

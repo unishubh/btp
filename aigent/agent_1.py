@@ -320,7 +320,7 @@ class Agent(baseAgent):
     def get_action(self):
         
         a = random.randrange(0,3)
-        return a
+        self.wm.action_chosen = a
         #print "Random Number generated ",a    
 
 
@@ -331,7 +331,7 @@ class Agent(baseAgent):
         d =  self.wm.should_shoot()
         e =  self.wm.is_ball_owned_by_us()
         f =  self.wm.is_ball_owned_by_enemy()
-        g =  self.wm.play_mode
+        g =  self.wm.get_play_mode()
         #h =  self.wm.ball.distance
         features = (a,b,c,d,e,f,g)
         #features = (1, 2, 3)
@@ -362,15 +362,15 @@ class Agent(baseAgent):
         else:
             fouls = [WorldModel.PlayModes.KICK_IN_L,WorldModel.PlayModes.FREE_KICK_L,WorldModel.PlayModes.CORNER_KICK_L,WorldModel.PlayModes.OFFSIDE_R]    
         if self.wm.is_ball_owned_by_us():
-            return 10
+            return 1
         elif self.wm.is_ball_owned_by_enemy():
-            return -20
+            return -2
         elif self.wm.play_mode in fouls:
-            return -100    
+            return -5    
         elif self.side == WorldModel.SIDE_L and self.wm.last_message == WorldModel.RefereeMessages.GOAL_R:
-            return -200
+            return -10
         elif self.side == WorldModel.SIDE_R and self.wm.last_message == WorldModel.RefereeMessages.GOAL_L:
-            return 200
+            return 10
         
                     
 
@@ -383,24 +383,30 @@ class Agent(baseAgent):
         features = self.get_features()
         print "before old_q features",features
         weights  = self.wm.weight
+        #print weights
         features = list(features)
         #print "weights ", weights
-        print type(features)
-
+        
+        self.get_action()
+        self.set_flags_prev_state()
+        self.perform_action(self.wm.action_chosen)
+        self.set_flags_next_state()
         #old_q = self.wm.old_q
         new_q = 0
-        for w,f in zip(weights,features):
-            
-            print "Weight is ",w
-            print "Feature is ",f
+        for k in range(7):
+            w =weights[self.wm.action_chosen][k]
+            #print "Weight is ",w
+            f = features[k] 
+            #print "Feature is ",f
             new_q = new_q + w*f
-        print self.wm.old_q,new_q
+        print self.wm.old_q,new_q,"are the q values"
+        
         reward = self.get_reward()
-        print "reward ", reward
-        self.set_flags_prev_state()
-        action_chosen = self.get_action()
-        self.perform_action(action_chosen)  
-        self.set_flags_next_state()
+        #print "reward ", reward
+        
+        
+          
+        
         
         # time.sleep(0.5)
         # self.perform_action(action_chosen)
@@ -412,21 +418,25 @@ class Agent(baseAgent):
         #     #print "new feature",f
         #     new_q = new_q + w*f
         # print "old_q ",old_q," new_q ", new_q
-
+        
+       
         diff = (reward + (self.wm.gamma*new_q)) - self.wm.old_q
         count = 0
-        for w,f in zip(weights,features):
+        for k in range(7):
+             #print self.wm.action_chosen,k,weights[self.wm.action_chosen][k]
+             w =weights[self.wm.action_chosen][k]
+             f = features[k]
              w = w + (self.wm.learning_rate*diff*f)
              ##print "New w is ",w
-             self.wm.weight[count] = w
+             self.wm.weight[self.wm.action_chosen][k] = w
              count = count + 1
-        b=sum(weights)
-        count = 0
-        print "weights sum  ", b
-        for w in weights:
-            w=w/b
-            self.wm.weight[count] = w
-            count = count + 1
+        #b=sum(weights)
+        ##count = 0
+        #print "weights sum  ", b
+        #for w in weights:
+         #   w=w/b
+          #  self.wm.weight[count] = w
+           # count = count + 1
 
         self.wm.old_q = new_q
         if self.wm.is_terminal():
