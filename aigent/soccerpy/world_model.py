@@ -1,27 +1,7 @@
-############################################################################################################
-##  Points considered as features are  
-##  1. Distance to neearest teammate            --> def get_nearest_team_dist
-##  2. Distance to nearest enemy                --> def get_nearest_enemy_dist
-##  3. Number of opponents in a given range     --> def enemies_in_range
-##  4. Distance to ball                         --> self.ball.distance
-##  5. Distance to goal                         --> def distance_to_goal
-##  6. Should kick the ball to goal             --> def should_shoot
-##  7. Do we own the ball                       --> def is_ball_owned_by_us
-##  8. Does the enemy owns the ball             --> def is_ball_owned_by_enemy
-##  To Begin with we have following actions :
-##  1. Kick the ball to goal
-##  2. Kick the ball to nearest free teammate
-##  3. Dribble the ball towards the bisector of line to goal and nearest teammate.
-##  4. Move towards the ball.
-
-
-#############################################################################################################
-
-
-import numpy as np
 import math
 import random
-
+import time
+import datetime
 import message_parser
 import sp_exceptions
 import game_object
@@ -31,7 +11,7 @@ class WorldModel:
     Holds and updates the model of the world as known from current and past
     data.
     """
-
+    
     # constants for team sides
     SIDE_L = "l"
     SIDE_R = "r"
@@ -52,13 +32,13 @@ class WorldModel:
         FREE_KICK_L = "free_kick_l"
         FREE_KICK_R = "free_kick_r"
         CORNER_KICK_L = "corner_kick_l"
-        CORNER_KICK_R = "corner_kick_l"
+        CORNER_KICK_R = "corner_kick_r"
         GOAL_KICK_L = "goal_kick_l"
         GOAL_KICK_R = "goal_kick_r"
         DROP_BALL = "drop_ball"
         OFFSIDE_L = "offside_l"
         OFFSIDE_R = "offside_r"
-        
+
         def __init__(self):
             raise NotImplementedError("Don't instantiate a PlayModes class,"
                     " access it statically through WorldModel instead.")
@@ -98,6 +78,7 @@ class WorldModel:
         self.ah = action_handler
 
         # these variables store all objects for any particular game step
+        self.set_time = 0
         self.ball = None
         self.flags = []
         self.goals = []
@@ -106,6 +87,7 @@ class WorldModel:
         self.nearest_team_dist = None  # By Shukla
         self.nearest_enemy_dist = None # By Shukla
         self.enemy_range = 5 # By Shukla
+        self.simulation_start_time = None
 
         # the default position of this player, its home position
         self.home_point = (None, None)
@@ -121,18 +103,19 @@ class WorldModel:
         self.side = None
         self.uniform_number = None
         #save the various actions
-        self.action_chosen = -1
+
         self.action_array = ['shoot','kick to nearest teammate','move towards the ball','dribble']
         #q_values
         self.qvalues = [0,0,0,0]
         # number of episodes
         self.episodes_count = 0
+        self.st=False
 
         #number of training episodes
         self.training_episodes = 5
-
+        self.action_chosen = -1
         #initialize weights
-        self.weight =[ [0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0] ]
+        self.weight =[ [0,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,1],[0,0,0,0,0,0,0,1] ]
         #discount factor
         self.gamma = 0.5
 
@@ -179,6 +162,288 @@ class WorldModel:
         # create a new server parameter object for holding all server params
         self.server_parameters = ServerParameters()
 
+#chichra
+# ##################################### some retrieval methods      ##################################
+# get_time
+# get_playmode
+# get_side
+# goal_diff
+# page 116 soccer manual
+
+    def get_playmode(self):
+        play_modes = ["play_on","kick_off_r","kick_off_l","kick_in_l","kick_in_r","free_kick_l","free_kick_r","corner_kick_l","corner_kick_l","corner_kick_r","goal_kick_l","goal_kick_r","offside_l","offside_r","free_kick_fault_l","free_kick_fault_l"]
+        if self.play_mode in play_modes:
+
+            return play_modes.index(self.play_mode)
+        else:
+            return 30    
+
+    def get_side(self):
+        return self.side
+
+    def get_goal_diff(self):
+        return self.score_l - self.score_r       
+
+    def get_time(self):
+        time_taken =  datetime.datetime.now() - self.simulation_start_time
+        return time_taken.seconds
+
+    def get_teamname(self):
+        return self.teamname
+
+
+    def get_uniform_number():
+        return self.uniform_number
+
+
+#######################             play mode checking functions        #####################################
+# is_playon
+# is_before_kick_off
+# is_kick_off_us
+ 
+
+    def is_playon(self):
+
+        """
+        Tells us whether it's play time
+        """
+        return self.play_mode == WorldModel.PlayModes.PLAY_ON or self.play_mode == WorldModel.PlayModes.KICK_OFF_L or self.play_mode == WorldModel.PlayModes.KICK_OFF_R or self.play_mode == WorldModel.PlayModes.KICK_IN_L or self.play_mode == WorldModel.PlayModes.KICK_IN_R or self.play_mode == WorldModel.PlayModes.FREE_KICK_L or self.play_mode == WorldModel.PlayModes.FREE_KICK_R or self.play_mode == WorldModel.PlayModes.CORNER_KICK_L or self.play_mode == WorldModel.PlayModes.CORNER_KICK_R or self.play_mode == WorldModel.PlayModes.GOAL_KICK_L or self.play_mode == WorldModel.PlayModes.GOAL_KICK_R or self.play_mode == WorldModel.PlayModes.DROP_BALL or self.play_mode == WorldModel.PlayModes.OFFSIDE_L or self.play_mode == WorldModel.PlayModes.OFFSIDE_R
+
+    def is_before_kick_off(self):
+        """
+        Tells us whether the game is in a pre-kickoff state.
+        """
+
+        return self.play_mode == WorldModel.PlayModes.BEFORE_KICK_OFF
+
+    def is_kick_off_us(self):
+        """
+        Tells us whether it's our turn to kick off.
+        """
+
+        ko_left = WorldModel.PlayModes.KICK_OFF_L
+        ko_right = WorldModel.PlayModes.KICK_OFF_R
+
+        # print self.play_mode
+
+        # return whether we're on the side that's kicking off
+        return (self.side == WorldModel.SIDE_L and self.play_mode == ko_left or
+                self.side == WorldModel.SIDE_R and self.play_mode == ko_right)
+
+
+
+#################################### the distance and angle calculation functions     #####################################
+# euclidean_distance
+# get_distance_to_point
+# angle_between_points
+# get_angle_to_point
+
+
+    def euclidean_distance(self, point1, point2):
+        """
+        Returns the Euclidean distance between two points on a plane.
+        """
+        try:
+            x1 = point1[0]
+            y1 = point1[1]
+            x2 = point2[0]
+            y2 = point2[1]
+    
+            return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+        except:
+            return 200
+
+    def get_distance_to_point(self, point):
+        """
+        Returns the linear distance to some point on the field from the current
+        point.
+        """
+
+        return self.euclidean_distance(self.abs_coords, point)
+
+    def angle_between_points(self, point1, point2):
+        """
+        Returns the angle from the first point to the second, assuming that
+        these points exist on a plane, and that the positive x-axis is 0 degrees
+        and the positive y-axis is 90 degrees.  All returned angles are positive
+        and relative to the positive x-axis.
+        """
+
+        try:
+            x1 = point1[0]
+            y1 = point1[1]
+            x2 = point2[0]
+            y2 = point2[1]
+
+            # get components of vector between the points
+            dx = x2 - x1
+            dy = y2 - y1
+
+            # return the angle in degrees
+            a = math.degrees(math.atan2(dy, dx))
+            if a < 0:
+                a = 360 + a
+    
+            return a
+        except:
+            return 0
+
+    def get_angle_to_point(self, point):
+        """
+        Returns the relative angle to some point on the field from self.
+        """
+
+        # calculate absolute direction to point
+        # subtract from absolute body direction to get relative angle
+        return self.abs_body_dir - self.angle_between_points(self.abs_coords, point)   
+
+
+##########################################   define all the lower level skills hear     #####################################################################
+# align_neck_with_body
+# turn_neck_to_object
+# turn_body_to_point
+# turn_body_to_object
+# kick_to
+# get_effective_kick_power
+
+    def align_neck_with_body(self):
+        """
+        Turns the player's neck to be in line with its body, making the angle
+        between the two 0 degrees.
+        """
+
+        # neck angle is relative to body, so we turn it back the inverse way
+        if self.neck_direction is not None:
+            self.ah.turn_neck(self.neck_direction * -1)
+
+    def turn_neck_to_object(self, obj):
+        """
+        Turns the player's neck to a given object.
+        """
+
+        self.ah.turn_neck(obj.direction)   
+
+    def turn_neck_to_point(self, point):
+        '''turns the players neck to a point'''
+        relative_dir = self.get_angle_to_point(point)
+
+        if relative_dir > 180:
+            relative_dir = relative_dir - 180
+        elif relative_dir < -180:
+            relative_dir = relative_dir + 180
+
+        # turn to that angle
+        self.ah.turn(relative_dir)
+
+    def turn_body_to_point(self, point):
+        """
+        Turns the agent's body to face a given point on the field.
+        """
+
+        relative_dir = self.get_angle_to_point(point)
+
+        if relative_dir > 180:
+            relative_dir = relative_dir - 180
+        elif relative_dir < -180:
+            relative_dir = relative_dir + 180
+
+        # turn to that angle
+        self.ah.turn(relative_dir)
+
+    def turn_body_to_object(self, obj):
+        """
+        Turns the player's body to face a particular object.
+        """
+
+        self.ah.turn(obj.direction)
+
+    def kick_to(self, point, extra_power=0.0):
+        """
+        Kick the ball to some point with some extra-power factor added on.
+        extra_power=0.0 means the ball should stop at the given point, anything
+        higher means it should have proportionately more speed.
+        """
+
+        # how far are we from the desired point?
+        point_dist = self.euclidean_distance(self.abs_coords, point)
+
+        # get absolute direction to the point
+        abs_point_dir = self.angle_between_points(self.abs_coords, point)
+
+        # get relative direction to point from body, since kicks are relative to
+        # body direction.
+        if self.abs_body_dir is not None:
+            rel_point_dir = self.abs_body_dir - abs_point_dir
+
+        # we do a simple linear interpolation to calculate final kick speed,
+        # assuming a kick of power 100 goes 45 units in the given direction.
+        # these numbers were obtained from section 4.5.3 of the documentation.
+        # TODO: this will fail if parameters change, needs to be more flexible
+        max_kick_dist = 45.0
+        dist_ratio = point_dist / max_kick_dist
+
+        # find the required power given ideal conditions, then add scale up by
+        # difference bewteen actual aceivable power and maxpower.
+        required_power = dist_ratio * self.server_parameters.maxpower
+        effective_power = self.get_effective_kick_power(self.ball,
+                required_power)
+        required_power += 1 - (effective_power / required_power)
+
+        # add more power!
+        power_mod = 1.0 + extra_power
+        power = required_power * power_mod
+
+        # do the kick, finally
+        self.ah.kick(rel_point_dir, power)
+
+    def get_effective_kick_power(self, ball, power):
+        """
+        Returns the effective power of a kick given a ball object.  See formula
+        4.21 in the documentation for more details.
+        """
+
+        # we can't calculate if we don't have a distance to the ball
+        if ball.distance is None:
+            return
+
+        # first we get effective kick power:
+        # limit kick_power to be between minpower and maxpower
+        kick_power = max(min(power, self.server_parameters.maxpower),
+                self.server_parameters.minpower)
+
+        # scale it by the kick_power rate
+        kick_power *= self.server_parameters.kick_power_rate
+
+        # now we calculate the real effective power...
+        a = 0.25 * (ball.direction / 180)
+        b = 0.25 * (ball.distance / self.server_parameters.kickable_margin)
+
+        # ...and then return it
+        return 1 - a - b
+
+    def teleport_to_point(self, point):
+        """
+        Teleports the player to a given (x, y) point using the 'move' command.
+        """
+
+        self.ah.move(point[0], point[1])
+
+    def find_ball(self, turn_step = 36):
+
+        if self.ball.distance == None or self.ball.direction == None:
+            self.ah.turn(turn_step)
+        else:
+            ball = get_object_absolute_coords(self.ball)
+
+    def dash_to_point(self,point):
+
+        '''Turn body towards point, then dash towards it'''
+        turn_body_to_point(point)
+        self.ah.dash(60)
+
+
+########################            localisation Functions              ############################################
+
     def triangulate_direction(self, flags, flag_dict):
         """
         Determines absolute view angle for the player given a list of visible
@@ -199,7 +464,7 @@ class WorldModel:
         if len(abs_angles) > 0:
             return sum(abs_angles) / len(abs_angles)
 
-        return 0
+        return None
 
     def triangulate_position(self, flags, flag_dict, angle_step=36):
         """
@@ -307,48 +572,8 @@ class WorldModel:
         # return latest cluster iteration
         return latest
 
-    def euclidean_distance(self, point1, point2):
-        """
-        Returns the Euclidean distance between two points on a plane.
-        """
 
-        try:
-            x1 = point1[0]
-            y1 = point1[1]
-            x2 = point2[0]
-            y2 = point2[1]
-    
-            return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
-        except:
-            return 200
-
-    def angle_between_points(self, point1, point2):
-        """
-        Returns the angle from the first point to the second, assuming that
-        these points exist on a plane, and that the positive x-axis is 0 degrees
-        and the positive y-axis is 90 degrees.  All returned angles are positive
-        and relative to the positive x-axis.
-        """
-
-        try:
-            x1 = point1[0]
-            y1 = point1[1]
-            x2 = point2[0]
-            y2 = point2[1]
-
-            # get components of vector between the points
-            dx = x2 - x1
-            dy = y2 - y1
-
-            # return the angle in degrees
-            a = math.degrees(math.atan2(dy, dx))
-            if a < 0:
-                a = 360 + a
-    
-            return a
-        except:
-            return 0
-
+#update functions
     def process_new_info(self, ball, flags, goals, players, lines):
         """
         Update any internal variables based on the currently available
@@ -358,12 +583,11 @@ class WorldModel:
 
         # update basic information
         self.ball = ball
-        
         self.flags = flags
         self.goals = goals
         self.players = players
         self.lines = lines
-       # x = self.get_nearest_enemy()
+        # x = self.get_nearest_enemy()
         #y =self.get_nearest_teammate()
         # TODO: make all triangulate_* calculations more accurate
 
@@ -380,32 +604,6 @@ class WorldModel:
         else:
             self.abs_body_dir = None
 
-    def is_playon(self):
-        """
-        Tells us whether it's play time
-        """
-        return self.play_mode == WorldModel.PlayModes.PLAY_ON or self.play_mode == WorldModel.PlayModes.KICK_OFF_L or self.play_mode == WorldModel.PlayModes.KICK_OFF_R or self.play_mode == WorldModel.PlayModes.KICK_IN_L or self.play_mode == WorldModel.PlayModes.KICK_IN_R or self.play_mode == WorldModel.PlayModes.FREE_KICK_L or self.play_mode == WorldModel.PlayModes.FREE_KICK_R or self.play_mode == WorldModel.PlayModes.CORNER_KICK_L or self.play_mode == WorldModel.PlayModes.CORNER_KICK_R or self.play_mode == WorldModel.PlayModes.GOAL_KICK_L or self.play_mode == WorldModel.PlayModes.GOAL_KICK_R or self.play_mode == WorldModel.PlayModes.DROP_BALL or self.play_mode == WorldModel.PlayModes.OFFSIDE_L or self.play_mode == WorldModel.PlayModes.OFFSIDE_R
-
-    def is_before_kick_off(self):
-        """
-        Tells us whether the game is in a pre-kickoff state.
-        """
-
-        return self.play_mode == WorldModel.PlayModes.BEFORE_KICK_OFF
-
-    def is_kick_off_us(self):
-        """
-        Tells us whether it's our turn to kick off.
-        """
-
-        ko_left = WorldModel.PlayModes.KICK_OFF_L
-        ko_right = WorldModel.PlayModes.KICK_OFF_R
-
-        # print self.play_mode
-
-        # return whether we're on the side that's kicking off
-        return (self.side == WorldModel.SIDE_L and self.play_mode == ko_left or
-                self.side == WorldModel.SIDE_R and self.play_mode == ko_right)
 
     def is_dead_ball_them(self):
         """
@@ -449,110 +647,7 @@ class WorldModel:
 
         return self.server_parameters.ball_speed_max
 
-    def kick_to(self, point, extra_power=0.0):
-        """
-        Kick the ball to some point with some extra-power factor added on.
-        extra_power=0.0 means the ball should stop at the given point, anything
-        higher means it should have proportionately more speed.
-        """
-
-        # how far are we from the desired point?
-        point_dist = self.euclidean_distance(self.abs_coords, point)
-
-        # get absolute direction to the point
-        abs_point_dir = self.angle_between_points(self.abs_coords, point)
-
-        # get relative direction to point from body, since kicks are relative to
-        # body direction.
-        if self.abs_body_dir is not None:
-            rel_point_dir = self.abs_body_dir - abs_point_dir
-
-        # we do a simple linear interpolation to calculate final kick speed,
-        # assuming a kick of power 100 goes 45 units in the given direction.
-        # these numbers were obtained from section 4.5.3 of the documentation.
-        # TODO: this will fail if parameters change, needs to be more flexible
-        max_kick_dist = 45.0
-        dist_ratio = point_dist / max_kick_dist
-
-        # find the required power given ideal conditions, then add scale up by
-        # difference bewteen actual aceivable power and maxpower.
-        required_power = dist_ratio * self.server_parameters.maxpower
-        effective_power = self.get_effective_kick_power(self.ball,
-                required_power)
-        required_power += 1 - (effective_power / required_power)
-
-        # add more power!
-        power_mod = 1.0 + extra_power
-        power = required_power * power_mod
-
-        # do the kick, finally
-        self.ah.kick(rel_point_dir, power)
-
-    def get_effective_kick_power(self, ball, power):
-        """
-        Returns the effective power of a kick given a ball object.  See formula
-        4.21 in the documentation for more details.
-        """
-
-        # we can't calculate if we don't have a distance to the ball
-        if ball is None or ball.distance is None:
-            return
-
-        # first we get effective kick power:
-        # limit kick_power to be between minpower and maxpower
-        kick_power = max(min(power, self.server_parameters.maxpower),
-                self.server_parameters.minpower)
-
-        # scale it by the kick_power rate
-        kick_power *= self.server_parameters.kick_power_rate
-
-        # now we calculate the real effective power...
-        a = 0.25 * (ball.direction / 180)
-        b = 0.25 * (ball.distance / self.server_parameters.kickable_margin)
-
-        # ...and then return it
-        return 1 - a - b
-
-    def turn_neck_to_object(self, obj):
-        """
-        Turns the player's neck to a given object.
-        """
-
-        self.ah.turn_neck(obj.direction)
-
-    def get_distance_to_point(self, point):
-        """
-        Returns the linear distance to some point on the field from the current
-        point.
-        """
-
-        return self.euclidean_distance(self.abs_coords, point)
-
-    # Keng-added
-    def get_angle_to_point(self, point):
-        """
-        Returns the relative angle to some point on the field from self.
-        """
-
-        # calculate absolute direction to point
-        # subtract from absolute body direction to get relative angle
-        return self.abs_body_dir - self.angle_between_points(self.abs_coords, point)
-
-    # Keng-added
-    def turn_body_to_point(self, point):
-        """
-        Turns the agent's body to face a given point on the field.
-        """
-
-        relative_dir = self.get_angle_to_point(point)
-
-        if relative_dir > 180:
-            relative_dir = relative_dir - 180
-        elif relative_dir < -180:
-            relative_dir = relative_dir + 180
-
-        # turn to that angle
-        self.ah.turn(relative_dir)
+   
 
     def get_object_absolute_coords(self, obj):
         """
@@ -562,36 +657,26 @@ class WorldModel:
         """
 
         # we can't calculate this without a distance to the object
-        if obj.distance is None:
-            return None
-
-        # get the components of the vector to the object
-        dx = obj.distance * math.cos(obj.direction)
-        dy = obj.distance * math.sin(obj.direction)
+        # time.sleep(1.7)
+        if obj is None or obj.distance is None or obj.direction is None:
+            dx=0
+            dy=0
+        else: 
+            # get the components of the vector to the object
+            dx = obj.distance * math.cos(obj.direction)
+            dy = obj.distance * math.sin(obj.direction)
 
         # return the point the object is at relative to our current position
+        # print "not returning none"
         return (self.abs_coords[0] + dx, self.abs_coords[1] + dy)
 
-    def teleport_to_point(self, point):
-        """
-        Teleports the player to a given (x, y) point using the 'move' command.
-        """
 
-        self.ah.move(point[0], point[1])
 
-    def align_neck_with_body(self):
-        """
-        Turns the player's neck to be in line with its body, making the angle
-        between the two 0 degrees.
-        """
 
-        # neck angle is relative to body, so we turn it back the inverse way
-        if self.neck_direction is not None:
-            self.ah.turn_neck(self.neck_direction * -1)
 
             
 ###########################################################################################################
-###################################### Functions of Some use################################################
+###################################### Functions of Some use ################################################
 ############################################################################################################
    
    
@@ -670,12 +755,12 @@ class WorldModel:
             self.last_message == WorldModel.RefereeMessages.GOALIE_CATCH_BALL_L or
             self.last_message == WorldModel.RefereeMessages.GOALIE_CATCH_BALL_R ) :
             return True
-                  
-        return False
-
-    def get_play_mode(self):
-            play_modes = ["play_on","kick_off_r","kick_off_l","kick_in_l","kick_in_r","free_kick_l","free_kick_r","corner_kick_l","corner_kick_l","corner_kick_r","goal_kick_l","goal_kick_r","offside_l","offside_r","free_kick_fault_l","free_kick_fault_l"]
-            return play_modes.index(self.play_mode)
+        else:
+             if self.side == WorldModel.SIDE_L:
+                 play_modes = ["kick_in_r","free_kick_r","corner_kick_r","goal_kick_r","offside_l","free_kick_fault_l"]
+                 if self.play_mode in play_modes:
+                     return True   
+                     return False
 
 
     def should_shoot(self):
@@ -803,12 +888,12 @@ class WorldModel:
         # holds tuples of (player dist to point, player)
         for p in self.players:
             # skip enemy and unknwon players
-            if self.ball is not None and  p.side == self.side and self.euclidean_distance(self.get_object_absolute_coords(self.ball), self.get_object_absolute_coords(p)) < self.server_parameters.kickable_margin:
-                return 1
+            if p.side == self.side and self.euclidean_distance(self.get_object_absolute_coords(self.ball), self.get_object_absolute_coords(p)) < self.server_parameters.kickable_margin:
+                return True
             else:
                 continue
 
-        return 0
+        return False
 
     
 
@@ -821,12 +906,12 @@ class WorldModel:
         # holds tuples of (player dist to point, player)
         for p in self.players:
             # skip enemy and unknwon players
-            if self.ball is not None and p.side != self.side and self.euclidean_distance(self.get_object_absolute_coords(self.ball), self.get_object_absolute_coords(p)) < self.server_parameters.kickable_margin:
-                return 1
+            if p.side != self.side and self.euclidean_distance(self.get_object_absolute_coords(self.ball), self.get_object_absolute_coords(p)) < self.server_parameters.kickable_margin:
+                return True
             else:
                 continue
 
-        return 0
+        return False
 
 
 
@@ -844,12 +929,7 @@ class WorldModel:
 
         return self.server_parameters.stamina_max
 
-    def turn_body_to_object(self, obj):
-        """
-        Turns the player's body to face a particular object.
-        """
 
-        self.ah.turn(obj.direction)
 
    
 

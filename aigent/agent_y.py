@@ -1,6 +1,34 @@
 #!/usr/bin/env python
 
 # The striker agent
+
+############################################################################################################
+##  Points considered as features are  
+##  1. Distance to nearest teammate            --> def get_nearest_team_dist
+##  2. Distance to nearest enemy                --> def get_nearest_enemy_dist
+##  3. Number of opponents in a given range     --> def enemies_in_range
+##  4. Distance to ball                         --> self.ball.distance
+##  5. Distance to goal                         --> def distance_to_goal
+##  6. Should kick the ball to goal             --> def should_shoot
+##  7. Do we own the ball                       --> def is_ball_owned_by_us
+##  8. Does the enemy owns the ball             --> def is_ball_owned_by_enemy
+##  9. simulation time
+##  10. no of goals scored already
+##  11. difference in goals
+##  12. Distance to teammate having max. freedom
+
+##  To Begin with we have following actions :
+##  1. Kick the ball to goal
+##  2. Kick the ball to nearest free teammate
+##  3. Dribble the ball towards the bisector of line to goal and nearest teammate.
+##  4. Move towards the ball.
+
+
+#############################################################################################################
+
+
+import soccerpy.game_object
+import datetime
 import time
 import numpy as np
 import random
@@ -10,16 +38,125 @@ from soccerpy.world_model import WorldModel
 
 
 class Agent(baseAgent):
+
+##########################      functions for ball position, parameters determination   ####################################
+    
+    def turn(self):
+    	
+    	self.wm.ah.turn(-22)
+    	#time.sleep(.16)
+
+     # check if ball is close to self
+    def ball_close(self):
+        return self.wm.ball.distance < 10
+
+    # find the ball by rotating if ball not found
+    
+    def find_ball(self):
+        # find the ball
+        point = [0,0]
+        while self.wm.ball is None or self.wm.ball.direction is None:
+            # print "turning"
+            self.turn()
+
+        if not -7 <= self.wm.ball.direction <= 7:
+            # if self.wm.ball is not None:
+            # print "ball dis", self.wm.ball.distance, self.wm.ball.direction
+            self.wm.turn_body_to_object(self.wm.ball)
+            
+            # else:
+            #     print "none ball "s
+            #     self.wm.turn_body_to_point(point)
+            # time.sleep(1)
+        # self.wm.ah.turn(30)
+        return 
+
+###################################     functions for checking the clear line and closeness to goal   ###############################################################################################################################################
+
+    # check if enemy goalpost is close enough
+    def goalpos_close(self):
+        return self.wm.get_distance_to_point(self.enemy_goal_pos) < 20
+
+    # check if path to target's coordinate is clear, by direction
+    def is_clear(self, target_coords):
+        q = self.wm.get_nearest_enemy()
+        if q == None:
+            return False
+        q_coords = self.wm.get_object_absolute_coords(q)
+        qDir = self.wm.get_angle_to_point(q_coords)
+        qDist = self.wm.get_distance_to_point(q_coords)
+        
+        tDir = self.wm.get_angle_to_point(target_coords)
+        tDist = self.wm.get_distance_to_point(target_coords)
+
+        # the closest teammate is closer, or angle is clear
+        return tDist < qDist or abs(qDir - tDir) > 20
+
+
+
+
+
+###############################################################     shall functions         ########################################################################################
+
+    # if enemy has the ball, and not too far move towards it
+    def shall_move_to_ball(self):
+        # while self.wm.ball is None:
+            # self.find_ball()
+        # self.wm.align_neck_with_body()
+        return self.wm.is_ball_owned_by_enemy() and self.wm.ball.distance < 30
+
+
+    # condition for shooting to the goal
+    def shall_shoot(self):
+       
+        return self.wm.is_ball_kickable() and self.goalpos_close() and self.is_clear(self.enemy_goal_pos)
+
+    # condition for passing to the closest teammate
+    # if can kick ball, teammate is closer to goal, path clear
+    def shall_pass(self):
+        # self.defaultaction()
+        p = self.wm.get_nearest_teammate()
+        if p == None:
+            return False
+        p_coords = self.wm.get_object_absolute_coords(p)
+        pDistToGoal = self.wm.euclidean_distance(p_coords, self.enemy_goal_pos)
+        myDistToGoal = self.wm.get_distance_to_point(self.enemy_goal_pos)
+
+        # kickable, pass closer to goal, path is clear
+        return self.wm.is_ball_kickable() and pDistToGoal < myDistToGoal and self.is_clear(p_coords)
+
+    # condition for dribbling, if can't shoot or pass
+    def shall_dribble(self):
+        return not self.shall_pass() and not self.shall_shoot()
+        # return self.wm.is_ball_kickable()
+
+
+    # when our team has ball, and self is not close enough to goalpos. advance to enemy goalpos
+    def shall_move_to_enemy_goalpos(self):
+        return self.wm.is_ball_owned_by_us() and self.goalpos_close()
+
+    # defensive, when ball isn't ours, and has entered our side of the field
+    def shall_move_to_defend(self):
+        # self.defaultaction()
+        if self.wm.ball is not None or self.wm.ball.direction is not None:
+            b_coords = self.wm.get_object_absolute_coords(self.wm.ball)
+            return self.wm.is_ball_owned_by_enemy() and self.wm.euclidean_distance(self.own_goal_pos, b_coords) < 55.0
+        return False
+
+
+
+###################################################   think function    ###################################################################################
+
     """
     The extended Agent class with specific heuritics
     """
-    
+
     def think(self):
         """
         Performs a single step of thinking for our agent.  Gets called on every
         iteration of our think loop.
         """
-        
+
         # DEBUG:  tells us if a thread dies
         if not self.__think_thread.is_alive() or not self.__msg_thread.is_alive():
             raise Exception("A thread died.")
@@ -67,73 +204,28 @@ class Agent(baseAgent):
             self.enemy_goal_pos = (55, 0)
             self.own_goal_pos = (-55, 0)
 
-        #if not self.wm.is_before_kick_off() or self.wm.is_kick_off_us() or self.wm.is_playon():
-            
-            # The main decision loop
-             #check if it is in training episode or actual evaluation
-        if not self.wm.is_before_kick_off():
+        #chichra
+        # to store the simulation start time
+        if not self.wm.is_before_kick_off() and self.wm.set_time==0:
+            self.wm.simulation_start_time = datetime.datetime.now()
+            print "sim start time ", self.wm.simulation_start_time 
+            self.wm.set_time+=1
 
-            self.retreive_actions()
-            '''self.num_of_episodes = self.wm.get_episodes()
+        if not self.wm.is_before_kick_off():
+           
+            self.num_of_episodes = self.wm.get_episodes()
             self.episodes_required = self.wm.get_required_episodes()
 
             if self.num_of_episodes<= self.episodes_required:
                 print "Training for player ",self.wm.uniform_number
                 return self.calculate_qvalues()
             else:
-
                 print "Training complete"
-                for i in self.wm.weight:
+                for i in self.weights:
                     print i
-                time.sleep(10)    
-                return None'''
+                return None
 
-      
-
-
-    # Heuristics begin
-
-    # check if ball is close to self
-    def ball_close(self):
-        return self.wm.ball.distance < 10
-
-    # check if enemy goalpost is close enough
-    def goalpos_close(self):
-        return self.wm.get_distance_to_point(self.enemy_goal_pos) < 20
-
-    # check if path to target's coordinate is clear, by direction
-    def is_clear(self, target_coords):
-        q = self.wm.get_nearest_enemy()
-        if q == None:
-            return False
-        q_coords = self.wm.get_object_absolute_coords(q)
-        qDir = self.wm.get_angle_to_point(q_coords)
-        qDist = self.wm.get_distance_to_point(q_coords)
-        
-        tDir = self.wm.get_angle_to_point(target_coords)
-        tDist = self.wm.get_distance_to_point(target_coords)
-
-        # the closest teammate is closer, or angle is clear
-        return tDist < qDist or abs(qDir - tDir) > 20
-
-
-    # Action decisions start
-    # 
-    # find the ball by rotating if ball not found
-    def find_ball(self):
-        # find the ball
-        #print self.wm.ball.direction, "is the ball direction"
-        if self.wm.ball is None or self.wm.ball.direction is None:
-            
-            self.wm.ah.turn(30)
-            print "Ball not in range, turning"
-            if  self.wm.ball is not None and not -7 <= self.wm.ball.direction <= 7:
-                print "Turning ", self.wm.ball.direction/2
-                self.wm.ah.turn(self.wm.ball.direction / 2)
-
-            return
-
-       
+##############################################      defaultaction       ########################################################### 
 
     # look around randomly
     def defaultaction(self):
@@ -141,7 +233,7 @@ class Agent(baseAgent):
         # kick off!
         if self.wm.is_before_kick_off():
             # player 9 takes the kick off
-            if self.wm.uniform_number == 9:
+            if self.wm.uniform_number == 3:
                 if self.wm.is_ball_kickable():
                     # kick with 100% extra effort at enemy goal
                     self.wm.kick_to(self.enemy_goal_pos, 1.0)
@@ -184,30 +276,13 @@ class Agent(baseAgent):
 
 
 
-    # condition for shooting to the goal
-    def shall_shoot(self):
-        # if self.wm.is_ball_kickable() and self.goalpos_close() and self.is_clear(self.enemy_goal_pos):
-        #     return 1:
-        # return 0
-        return self.wm.is_ball_kickable() and self.goalpos_close() and self.is_clear(self.enemy_goal_pos)
-
+###########################################  functions for  actions like shoot, dribble,pass  ##########################################################################
+ 
     # do shoot
     def shoot(self):
         print "shoot"
         return self.wm.kick_to(self.enemy_goal_pos, 1.0)
 
-    # condition for passing to the closest teammate
-    # if can kick ball, teammate is closer to goal, path clear
-    def shall_pass(self):
-        # self.defaultaction()
-        p = self.wm.get_nearest_teammate()
-        if p == None:
-            return False
-        p_coords = self.wm.get_object_absolute_coords(p)
-        pDistToGoal = self.wm.euclidean_distance(p_coords, self.enemy_goal_pos)
-        myDistToGoal = self.wm.get_distance_to_point(self.enemy_goal_pos)
-        # kickable, pass closer to goal, path is clear
-        return self.wm.is_ball_kickable() and pDistToGoal < myDistToGoal and self.is_clear(p_coords)
 
     # do passes
     def passes(self):
@@ -221,15 +296,7 @@ class Agent(baseAgent):
         # kick to closest teammate, power is scaled
         return self.wm.kick_to(p_coords, power_ratio)
 
-    # condition for dribbling, if can't shoot or pass
-    def shall_dribble(self):
-        # find the ball
-        # self.find_ball()
-        # if self.wm.ball is None or self.wm.ball.direction is None:
-            # self.wm.ah.turn(30)
-        return self.wm.is_ball_kickable()
 
-    # dribble: turn body, kick, then run towards ball
     def dribble(self):
         #print "dribbling"
         self.wm.kick_to(self.enemy_goal_pos, 1.0)
@@ -238,14 +305,6 @@ class Agent(baseAgent):
         self.wm.ah.dash(50)
         return
 
-    # if enemy has the ball, and not too far move towards it
-    def shall_move_to_ball(self):
-        # while self.wm.ball is None:
-            # self.find_ball()
-        # self.wm.align_neck_with_body()
-        return self.wm.is_ball_owned_by_enemy() and self.wm.ball.distance < 30
-
-    # move to ball, if enemy owns it
     def move_to_ball(self):
         if(self.wm.ball is not None):
             self.wm.turn_body_to_point(self.wm.get_object_absolute_coords(self.wm.ball))
@@ -255,13 +314,37 @@ class Agent(baseAgent):
         else:
             self.find_ball()
         return    
-    # defensive, when ball isn't ours, and has entered our side of the field
-    def shall_move_to_defend(self):
-        # self.defaultaction()
-        if self.wm.ball is not None or self.wm.ball.direction is not None:
-            b_coords = self.wm.get_object_absolute_coords(self.wm.ball)
-            return self.wm.is_ball_owned_by_enemy() and self.wm.euclidean_distance(self.own_goal_pos, b_coords) < 55.0
-        return False
+
+    # move to ball, if enemy owns it
+  #   def move_to_ball(self):
+  #       # first find ball, turn to it, then dash
+  #       # origin = [0,0]
+  #       # self.wm.turn_body_to_point(origin)
+  #       # while not self.find_ball():
+  #       # self.find_ball()
+  #       # self.wm.ah.turn(1)
+  #       # time.sleep(0.5)
+  #   	# self.wm.ah.dash(30)
+  #   	# self.turn()
+  #   	# while True:
+  #   		if self.wm.ball is None:
+		# 		self.turn()
+	 #        else:
+	 #        	print "found"
+	 #        	self.wm.turn_body_to_point(self.wm.ball)
+	 #        	self.wm.ah.dash(33)
+
+
+  #   	# self.wm.turn_body_to_point(self.wm.ball)
+
+  #       # if not -7 <= self.wm.ball.direction <= 7:
+  #       #     # if self.wm.ball is not None:
+  #       #     print "ball dis", self.wm.ball.distance, self.wm.ball.direction
+  #       #     self.wm.turn_body_to_object(self.wm.ball)
+  #       #     self.wm.ah.turn(30)
+		# return 
+
+
 
     # defend
     def move_to_defend(self):
@@ -283,9 +366,6 @@ class Agent(baseAgent):
         self.wm.ah.dash(80)
         return
 
-    # when our team has ball, and self is not close enough to goalpos. advance to enemy goalpos
-    def shall_move_to_enemy_goalpos(self):
-        return self.wm.is_ball_owned_by_us() and not self.goalpos_close()
 
     # if our team has the ball n u r striker
     def move_to_enemy_goalpos(self):
@@ -300,22 +380,10 @@ class Agent(baseAgent):
 
 
 
-
+                                            #######   Q-learning code   #####
 ###########################################################################################################
 ###########################################################################################################
-    def retreive_actions(self):
-        m = -9999999999
-        feature = self.get_features()
-        for i in range(4):
-            q = 0
-            for j in range(8):
-                w = self.wm.weight[i][j]
-                f = feature[j]
-                q = q+ w*f
-            if q > m:
-                m = q
-                action_chosen = i
-        self.perform_action_retreival(i)            
+    
     def set_flags_prev_state(self):
         if self.wm.is_ball_owned_by_enemy():
             self.wm.prev_ball_with_enemy = 1
@@ -328,34 +396,47 @@ class Agent(baseAgent):
             self.wm.next_ball_with_enemy = 1
         if self.wm.is_ball_owned_by_us():
             self.wm.next_ball_with_us = 1
-
-
-
+        
 
     def get_action(self):
         
-        a = random.randrange(0,3)
+        a = random.randrange(0,4)
         self.wm.action_chosen = a
+        return a
         #print "Random Number generated ",a    
 
-
     def get_features(self):
+
         a =  self.wm.get_nearest_team_dist()
         b =  self.wm.enemies_in_range()
         c =  self.wm.distance_to_goal()
         d =  self.wm.should_shoot()
         e =  self.wm.is_ball_owned_by_us()
         f =  self.wm.is_ball_owned_by_enemy()
-        g =  self.wm.get_playmode()
-        #h =  self.wm.ball.distance
+        # g =  self.wm.get_play_mode()
+        g = 1
+
+        # #h =  self.wm.ball.distance
+
         features = (a,b,c,d,e,f,g,1)
-        #features = (1, 2, 3)
+        # features = (1, 2, 3, 4, 4, 3, 2, 1)
         print type(features)  
         return features
+ 
+  
 
 
     ##  More things to be added to this function    
     def get_reward(self):
+
+    # ball is with our team and ball goes to opponent team --> neg
+    # ball is with our team and remains with us --> zero/pos
+    # ball is with us, no team possess the ball --> neg
+    # ball is with opponent team , reamins with them --> neg
+    # ball is with opponent team , comes to us --> pos
+    # ball is with opponent team ,now no team posesses the ball --> pos
+    # ball hits the opponent goal --> pos
+    # ball goes outside --> neg
 
         if self.wm.prev_ball_with_us and self.wm.next_ball_with_us:
             return 5
@@ -369,8 +450,7 @@ class Agent(baseAgent):
             return 10
         if self.wm.prev_ball_with_enemy and not self.wm.next_ball_with_us and not self.wm.next_ball_with_enemy:
             return 5
-        else:
-            return 0
+
         if self.wm.side == WorldModel.SIDE_L:
             fouls = [WorldModel.PlayModes.KICK_IN_R,WorldModel.PlayModes.FREE_KICK_R,WorldModel.PlayModes.CORNER_KICK_R,WorldModel.PlayModes.OFFSIDE_L]
             
@@ -382,128 +462,168 @@ class Agent(baseAgent):
             return -2
         elif self.wm.play_mode in fouls:
             return -5    
-        elif self.side == WorldModel.SIDE_L and self.wm.last_message == WorldModel.RefereeMessages.GOAL_R:
+        elif self.wm.side == WorldModel.SIDE_L and self.wm.last_message == WorldModel.RefereeMessages.GOAL_R:
             return -10
-        elif self.side == WorldModel.SIDE_R and self.wm.last_message == WorldModel.RefereeMessages.GOAL_L:
+        elif self.wm.side == WorldModel.SIDE_R and self.wm.last_message == WorldModel.RefereeMessages.GOAL_L:
             return 10
-        
-                    
-
         else:
-            return 5    
+            return 5
     
-    #weights ad qvalues icreasing expoentiatlly.Features should return small values
-
     def calculate_qvalues(self):
+        print "Starting of calculating q values"
         features = self.get_features()
-        print "before old_q features",features
-        weights  = self.wm.weight
-        #print weights
         features = list(features)
-        #print "weights ", weights
+        print "get features returned",features
+        weights  = self.wm.weight    
+        print '__________________________________________________________'
+        print "weight matrix ", weights    
+        print '__________________________________________________________'
+ 
         
         self.get_action()
+        print "get action returns", self.wm.action_chosen
         self.set_flags_prev_state()
         self.perform_action(self.wm.action_chosen)
         self.set_flags_next_state()
-        #old_q = self.wm.old_q
+
+        
         new_q = 0
         for k in range(8):
             w =weights[self.wm.action_chosen][k]
-            #print "Weight is ",w
+            print "Weight is ",w
             f = features[k] 
-            #print "Feature is ",f
+            print "Feature is ",f
             new_q = new_q + w*f
-        print self.wm.old_q,new_q,"are the q values"
+
+        print "old q ", self.wm.old_q
+        print "new_q ", new_q
         
         reward = self.get_reward()
-        #print "reward ", reward
-        
-        
-          
-        
-        
-        # time.sleep(0.5)
-        # self.perform_action(action_chosen)
-        # features = self.get_features()
-        # print "after old_q features",features
-        # for w,f in zip(weights,features):
-        #     #print "Calculatomg new"
-        #     #print "new weight ",w
-        #     #print "new feature",f
-        #     new_q = new_q + w*f
-        # print "old_q ",old_q," new_q ", new_q
-        
+        print "reward ", reward        
        
         diff = (reward + (self.wm.gamma*new_q)) - self.wm.old_q
-        count = 0
+        print "diff ", diff
+
+        # count = 0
         for k in range(8):
-             #print self.wm.action_chosen,k,weights[self.wm.action_chosen][k]
-             w =weights[self.wm.action_chosen][k]
+             print self.wm.action_chosen,k,weights[self.wm.action_chosen][k]
+             w = weights[self.wm.action_chosen][k]
              f = features[k]
              w = w + (self.wm.learning_rate*diff*f)
-             ##print "New w is ",w
+             print "New w is ",w
              self.wm.weight[self.wm.action_chosen][k] = w
-             count = count + 1
+             # count = count + 1
         s = 0
+        #calculating the sum of weight vector
         for k in range(8):
             s = s + weights[self.wm.action_chosen][k]
+
+        print "sum of weights ", s
+
+        # normalizing it
         for k in range(8):
             w = weights[self.wm.action_chosen][k]
             w = w/s
             print "normalized weight ", w
-            weights[self.wm.action_chosen][k] = w     
-
-        #b=sum(weights)
-        ##count = 0
-        #print "weights sum  ", b
-        #for w in weights:
-         #   w=w/b
-          #  self.wm.weight[count] = w
-           # count = count + 1
+            weights[self.wm.action_chosen][k] = w 
 
         self.wm.old_q = new_q
-        
-        if self.wm.is_terminal() and self.wm.st==False:
-            
+
+        if self.wm.is_terminal():
             print "terminal state"
+            self.num_of_episodes = self.num_of_episodes + 1
+
+    # def calculate_qvalues(self):
+    #     features = self.get_features()
+    #     # print "before old_q features",features
+    #     weights  = self.wm.weight
+    #     features = list(features)
+    #     #print "weights ", weights
+    #     # print type(features)
+
+    #     #old_q = self.wm.old_q
+    #     # new_q = 0
+    #     # for w,f in zip(weights,features):
             
-            self.wm.episodes_count = self.wm.episodes_count + 1
-            self.wm.st = True
-            print self.wm.episodes_count,"is num_of_episodes"
-            print self.wm.st
-            time.sleep(0.5)
-        elif not self.wm.is_terminal() and self.wm.st==True:
-            print "chng"
-            self.wm.st = False
-                
+    #         # print "Weight is ",w
+    #         # print "Feature is ",f
+    #         # new_q = new_q + w*f
+    #     # print self.wm.old_q,new_q
+    #     # reward = self.get_reward()
+    #     # print "reward ", reward
+
+    #     self.set_flags_prev_state()
+    #     action_chosen = self.get_action()
+    #     self.perform_action(action_chosen) 
+    #     self.set_flags_next_state()
+
+    #     reward = self.get_reward() 
 
 
+    #     new_q = 0
+    #     for k in range(8):
+    #         w = weight[self.wm.action_chosen][k]
+    #         f = features[k]
+    #         new_q = new_q + w*f
 
-    def perform_action_retreival(self,action_chosen):
-        print "The action chosen is",action_chosen
-        if action_chosen == 0:
-            if self.shall_shoot():
-                return self.shoot()
-            else:
-                return self.perform_action(random.randrange(0,3))   
-        elif action_chosen == 1:
-            if self.shall_pass():
-                return self.passes()
-            else:
-                return self.perform_action(random.randrange(0,3))
-
-        elif action_chosen == 2:
-            print "move to ball"
-            return self.move_to_ball()
+    #     print self.wm.old_q, new_q, "are the q values"
 
 
-        else:
-            if self.shall_dribble():
-                return self.dribble()
-            else:
-               return self.perform_action(random.randrange(0,3))     
+    #     diff = (reward + (self.wm.gamma*new_q)) - self.wm.old_q
+    #     count = 0
+    #     for k in range(8):
+    #         w = weights[self.wm.action_chosen][k]
+    #         f = features[k]
+        
+    #         w = w + (self.wm.learning_rate*diff*f)
+    #          ##print "New w is ",w
+    #         self.wm.weight[count] = w
+    #         count = count + 1
 
+    #     b=sum(weights)
+    #     count = 0
+    #     # print "weights sum  ", b
+    #     for w in weights:
+    #         w=w/b
+    #         self.wm.weight[count] = w
+    #         count = count + 1
+
+    #     self.wm.old_q = new_q
+    #     if self.wm.is_terminal():
+    #         self.num_of_episodes = self.num_of_episodes + 1
+    
+    # def perform_action(self,action_chosen):
+    #     flag = 0
+
+    #     if action_chosen==0:
+    #         print "shooting"
+    #         if self.shall_shoot():
+    #             return self.shall_shoot()
+    #             flag = 1            
+
+    #     if action_chosen == 1:
+    #         print "Passing"
+    #         if self.shall_pass():
+    #             return self.passes()
+    #             flag = 1
+
+    #     if action_chosen == 2:
+    #         print "dribbling"
+    #         if self.shall_dribble():
+    #             self.dribble()
+    #             flag = 1
+            
+    #     if action_chosen == 3 or flag==0 :
+    #         print "moving to ball"
+    #         self.move_to_ball()
+    #         # print "calculating coordinates "
+    #         # print self.wm.triangulate_position(self.wm.flags, soccerpy.game_object.Flag.FLAG_COORDS)
+    #         # time.sleep(0.5)
+    #         # print "time of sim ", self.wm.get_time()
+    #         # print "self-side ", self.wm.get_side()
+    #         # print "play_mode ", self.wm.get_playmode()
+    #         # print "uniform no ", self.wm.uniform_number
+    #         # print "teamname ", self.wm.get_teamname()
             
     def perform_action(self,action_chosen):
         print "Action ",action_chosen
@@ -525,7 +645,7 @@ class Agent(baseAgent):
 
         else:
             return self.dribble()
-
+        
 
     def decisionLoop(self):
         try:
@@ -551,7 +671,7 @@ class Agent(baseAgent):
             # print "exceptions thrown, using fallback"
             self.defaultaction()
         
-
+# -----------------------------------------------------------------------------------------------------------------------
 
 # by role: striker, defender
 # do the same preconds, but def on role diff actions
